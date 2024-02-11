@@ -1,6 +1,6 @@
 // ROS
 #include <rclcpp/rclcpp.hpp>
-#include <std_msgs/msg/int64.hpp>
+#include <std_msgs/msg/int16.hpp>
 #include <geometry_msgs/msg/twist.hpp>
 // CPP
 #include <memory>
@@ -39,8 +39,8 @@ public:
     else 
       RCLCPP_ERROR_STREAM(get_logger(), "velocity_pwm_limits has wrong size. Required format: [min, neutral, max]");
 
-    pub_steering_channel_ = this->create_publisher<std_msgs::msg::Int64>("channel1", 10); // steering angle 
-    pub_velocity_channel_ = this->create_publisher<std_msgs::msg::Int64>("channel2", 10); // linear velocity
+    pub_steering_channel_ = this->create_publisher<std_msgs::msg::Int16>("channel1", 10); // steering angle 
+    pub_velocity_channel_ = this->create_publisher<std_msgs::msg::Int16>("channel2", 10); // linear velocity
     
     sub_cmd_vel_ =
         this->create_subscription<geometry_msgs::msg::Twist>("cmd_vel", 10, std::bind(&RCCar::cb_cmd_vel, this, _1));
@@ -49,8 +49,8 @@ public:
   }
 
 private:
-  rclcpp::Publisher<std_msgs::msg::Int64>::SharedPtr pub_steering_channel_;
-  rclcpp::Publisher<std_msgs::msg::Int64>::SharedPtr pub_velocity_channel_;
+  rclcpp::Publisher<std_msgs::msg::Int16>::SharedPtr pub_steering_channel_;
+  rclcpp::Publisher<std_msgs::msg::Int16>::SharedPtr pub_velocity_channel_;
   rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr sub_cmd_vel_;
   rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr sub_cmd_vel_ackermann_;
   double wheelbase_;
@@ -87,11 +87,11 @@ private:
     auto steering_pwm_signal = calc_pwm_signal(steering_angle_ratio, steering_pwm_limits_);
     auto velocity_pwm_signal = calc_pwm_signal(linear_vel_ratio, velocity_pwm_limits_);
 
-    auto steering_msg = std_msgs::msg::Int64();
+    auto steering_msg = std_msgs::msg::Int16();
     steering_msg.data = steering_pwm_signal;
     pub_steering_channel_->publish(steering_msg);
 
-    auto velocity_msg = std_msgs::msg::Int64();
+    auto velocity_msg = std_msgs::msg::Int16();
     velocity_msg.data = velocity_pwm_signal;
     pub_velocity_channel_->publish(velocity_msg);
   }
