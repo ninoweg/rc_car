@@ -1,0 +1,7 @@
+/rc_car:
+  ros__parameters:
+    wheelbase: 0.31 # in m
+    max_linear_velocity: 1.1  # in m/s
+    max_steering_angle: 0.4   # absolute -> [-max, max] in rad
+    steering_pwm_limits: [1000, 1500, 2000] # in mus
+    velocity_pwm_limits: [1000, 1500, 2000] # in mus
