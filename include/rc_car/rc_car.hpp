@@ -1,12 +1,13 @@
 // ROS
 #include <rclcpp/rclcpp.hpp>
-#include <std_msgs/msg/int16.hpp>
+#include <std_msgs/msg/int64.hpp>
 #include <geometry_msgs/msg/twist.hpp>
 // CPP
 #include <memory>
 #include <cmath>
 #include <string>
 #include <algorithm>
+#include <vector>
 
 using namespace std::chrono_literals;
 using std::placeholders::_1;
@@ -14,18 +15,33 @@ using std::placeholders::_1;
 class RCCar : public rclcpp::Node
 {
 public:
-  RCCar()
-    : Node("rc_car")
-    , wheelbase_{ 0.3 }
-    , max_linear_vel_{ 1.0 }
-    , max_steering_angle_{ M_PI / 8 }
-    , channel1_signal_limits_{ 544, 2400 }
-    , channel2_signal_limits_{ 544, 2400 }
-    , channel1_signal_neutral_{ 1500 }
-    , channel2_signal_neutral_{ 1500 }
+  RCCar() : Node("rc_car")
   {
-    pub_channel_1_ = this->create_publisher<std_msgs::msg::Int16>("channel1", 10);
-    pub_channel_2_ = this->create_publisher<std_msgs::msg::Int16>("channel2", 10);
+    declare_parameter("wheelbase", 0.3);
+    declare_parameter("max_linear_velocity", 1.0);
+    declare_parameter("max_steering_angle", M_PI / 8);
+    declare_parameter("steering_pwm_limits", std::vector<int64_t>({ 544, 1500, 2400 }));
+    declare_parameter("velocity_pwm_limits", std::vector<int64_t>({ 544, 1500, 2400 }));
+
+    get_parameter("wheelbase", wheelbase_);
+    get_parameter("max_linear_velocity", max_linear_velocity_);
+    get_parameter("max_steering_angle", max_steering_angle_);
+    
+    auto steering_pwm_limits = get_parameter("steering_pwm_limits").as_integer_array();
+    if (steering_pwm_limits.size() == 3)
+      steering_pwm_limits_ = steering_pwm_limits;
+    else 
+      RCLCPP_ERROR_STREAM(get_logger(), "steering_pwm_limits has wrong size. Required format: [min, neutral, max]");
+    
+    auto velocity_pwm_limits = get_parameter("velocity_pwm_limits").as_integer_array();
+    if (velocity_pwm_limits.size() == 3)
+      velocity_pwm_limits_ = velocity_pwm_limits;
+    else 
+      RCLCPP_ERROR_STREAM(get_logger(), "velocity_pwm_limits has wrong size. Required format: [min, neutral, max]");
+
+    pub_steering_channel_ = this->create_publisher<std_msgs::msg::Int64>("channel1", 10); // steering angle 
+    pub_velocity_channel_ = this->create_publisher<std_msgs::msg::Int64>("channel2", 10); // linear velocity
+    
     sub_cmd_vel_ =
         this->create_subscription<geometry_msgs::msg::Twist>("cmd_vel", 10, std::bind(&RCCar::cb_cmd_vel, this, _1));
     sub_cmd_vel_ackermann_ = this->create_subscription<geometry_msgs::msg::Twist>(
@@ -33,62 +49,60 @@ public:
   }
 
 private:
-  rclcpp::Publisher<std_msgs::msg::Int16>::SharedPtr pub_channel_1_;
-  rclcpp::Publisher<std_msgs::msg::Int16>::SharedPtr pub_channel_2_;
+  rclcpp::Publisher<std_msgs::msg::Int64>::SharedPtr pub_steering_channel_;
+  rclcpp::Publisher<std_msgs::msg::Int64>::SharedPtr pub_velocity_channel_;
   rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr sub_cmd_vel_;
   rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr sub_cmd_vel_ackermann_;
   double wheelbase_;
-  double max_linear_vel_;
+  double max_linear_velocity_;
   double max_steering_angle_;
-  std::pair<int, int> channel1_signal_limits_;
-  std::pair<int, int> channel2_signal_limits_;
-  int channel1_signal_neutral_;
-  int channel2_signal_neutral_;
+  std::vector<int64_t> steering_pwm_limits_;
+  std::vector<int64_t> velocity_pwm_limits_;
 
   void cb_cmd_vel(const geometry_msgs::msg::Twist::SharedPtr msg)
   {
-    auto linear_vel = msg->linear.x;
+    auto velocity = msg->linear.x;
     auto steering_angle{ 0.0 };
     if (abs(msg->linear.x) > 1e-3)
       steering_angle = atan((wheelbase_ * msg->angular.z) / msg->linear.x);
     else
       steering_angle = 0.0;
 
-    publish_pwm_signals(steering_angle, linear_vel);
+    pub_pwm_signals(steering_angle, velocity);
   }
 
   void cb_cmd_vel_ackermann(const geometry_msgs::msg::Twist::SharedPtr msg)
   {
-    auto linear_vel = msg->linear.x;
+    auto velocity = msg->linear.x;
     auto steering_angle = msg->angular.z;
 
-    publish_pwm_signals(steering_angle, linear_vel);
+    pub_pwm_signals(steering_angle, velocity);
   }
 
-  void publish_pwm_signals(double steering_angle, double linear_vel)
+  void pub_pwm_signals(double steering_angle, double velocity)
   {
     auto steering_angle_ratio = std::clamp(steering_angle / max_steering_angle_, -1.0, 1.0);
-    auto linear_vel_ratio = std::clamp(linear_vel / max_linear_vel_, -1.0, 1.0);
+    auto linear_vel_ratio = std::clamp(velocity / max_linear_velocity_, -1.0, 1.0);
 
-    auto channel1_signal = calc_pwm_signal(steering_angle_ratio, channel1_signal_neutral_, channel1_signal_limits_);
-    auto channel2_signal = calc_pwm_signal(linear_vel_ratio, channel2_signal_neutral_, channel2_signal_limits_);
+    auto steering_pwm_signal = calc_pwm_signal(steering_angle_ratio, steering_pwm_limits_);
+    auto velocity_pwm_signal = calc_pwm_signal(linear_vel_ratio, velocity_pwm_limits_);
 
-    auto msg1 = std_msgs::msg::Int16();
-    msg1.data = channel1_signal;
-    pub_channel_1_->publish(msg1);
+    auto steering_msg = std_msgs::msg::Int64();
+    steering_msg.data = steering_pwm_signal;
+    pub_steering_channel_->publish(steering_msg);
 
-    auto msg2 = std_msgs::msg::Int16();
-    msg2.data = channel2_signal;
-    pub_channel_2_->publish(msg2);
+    auto velocity_msg = std_msgs::msg::Int64();
+    velocity_msg.data = velocity_pwm_signal;
+    pub_velocity_channel_->publish(velocity_msg);
   }
 
-  double calc_pwm_signal(double ratio, double neutral, std::pair<int, int> limits)
+  double calc_pwm_signal(double ratio, std::vector<int64_t> limits)
   {
-    auto signal = neutral;
+    auto signal = limits[1];
     if (ratio > 0.0)
-      signal += ratio * (limits.first - neutral);
+      signal += ratio * (limits[0] - limits[1]);
     else
-      signal += ratio * (neutral - limits.second);
+      signal += ratio * (limits[1] - limits[2]);
     return signal;
   }
 };
